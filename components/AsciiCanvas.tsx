@@ -37,39 +37,42 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
       streamRef.current = null;
     }
 
-    // Clear video source before reassigning (fixes some Android browsers)
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
 
-    try {
-      // Try with ideal constraints first
-      let stream: MediaStream;
+    // Clear any previous error
+    setError(null);
+
+    // Try multiple constraint strategies — Android/iOS behave differently
+    const attempts = [
+      // 1. exact facingMode with resolution (best for camera switching)
+      { video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: { exact: facing } } },
+      // 2. exact facingMode without resolution
+      { video: { facingMode: { exact: facing } } },
+      // 3. ideal facingMode (some devices only support this)
+      { video: { facingMode: facing } },
+      // 4. Last resort — any camera
+      { video: true },
+    ];
+
+    for (const constraints of attempts) {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: facing,
-          }
-        });
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        streamRef.current = stream;
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+        return; // Success — stop trying
       } catch {
-        // Fallback: some devices fail with specific constraints
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: facing }
-        });
+        // Try next constraint
       }
-
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(e => console.error("Play error:", e));
-      }
-    } catch (err) {
-      console.error("Error accessing camera:", err);
-      setError("Can't access camera. Please allow permissions!");
     }
+
+    // All attempts failed
+    setError("Can't access camera. Please allow permissions!");
   }, []);
 
   useEffect(() => {
