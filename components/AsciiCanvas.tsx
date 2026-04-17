@@ -21,6 +21,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showFlash, setShowFlash] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const facingModeRef = useRef<'user' | 'environment'>('user');
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
 
   // Check if device has multiple cameras
@@ -90,11 +91,12 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
   }, []);
 
   const handleFlipCamera = useCallback(() => {
-    const newFacing = facingMode === 'user' ? 'environment' : 'user';
+    const newFacing = facingModeRef.current === 'user' ? 'environment' : 'user';
+    facingModeRef.current = newFacing;
     setFacingMode(newFacing);
     prevFrameRef.current = null;
     startCamera(newFacing);
-  }, [facingMode, startCamera]);
+  }, [startCamera]);
 
   // Handle canvas resizing
   useEffect(() => {
@@ -175,14 +177,8 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         return;
       }
 
-      // Draw video to hidden canvas (mirror only for front camera)
-      hCtx.save();
-      if (facingMode === 'user') {
-        hCtx.translate(cols, 0);
-        hCtx.scale(-1, 1);
-      }
+      // Draw video to hidden canvas
       hCtx.drawImage(video, 0, 0, cols, rows);
-      hCtx.restore();
 
       const frameData = hCtx.getImageData(0, 0, cols, rows);
       const data = frameData.data;
@@ -272,7 +268,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [options, facingMode]);
+  }, [options]);
 
   const doCapture = useCallback(() => {
     if (!canvasRef.current) return;
