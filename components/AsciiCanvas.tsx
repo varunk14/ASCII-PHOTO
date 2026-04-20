@@ -9,44 +9,51 @@ interface AsciiCanvasProps {
 }
 
 export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const hiddenCanvasRef = useRef<HTMLCanvasElement>(null);
+  const hiddenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const prevFrameRef = useRef<Float32Array | null>(null);
   const animationRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
 
+  // Create video and hidden canvas programmatically — never in DOM
   useEffect(() => {
+    const video = document.createElement('video');
+    video.playsInline = true;
+    video.autoplay = true;
+    video.muted = true;
+    videoRef.current = video;
+
+    const hCanvas = document.createElement('canvas');
+    hiddenCanvasRef.current = hCanvas;
+
     let stream: MediaStream | null = null;
     const startCamera = async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 960 }, facingMode: 'user' }
+          video: { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: 'user' }
         });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-          playStartupSound();
-        }
+        video.srcObject = stream;
+        await video.play().catch(() => {});
+        playStartupSound();
       } catch {
         setError("Can't access camera. Please allow permissions!");
       }
     };
     startCamera();
-    return () => { if (stream) stream.getTracks().forEach(t => t.stop()); };
+    return () => {
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+      videoRef.current = null;
+      hiddenCanvasRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
     const handleResize = () => {
       if (canvasRef.current) {
-        const parent = canvasRef.current.parentElement;
-        if (parent) {
-          canvasRef.current.width = parent.clientWidth;
-          canvasRef.current.height = parent.clientHeight;
-        } else {
-          canvasRef.current.width = window.innerWidth;
-          canvasRef.current.height = window.innerHeight;
-        }
+        canvasRef.current.width = window.innerWidth;
+        canvasRef.current.height = window.innerHeight;
       }
     };
     window.addEventListener('resize', handleResize);
@@ -67,12 +74,18 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         return;
       }
 
+      // Ensure canvas is always full screen
+      if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+
       const ctx = canvas.getContext('2d', { alpha: false });
       const hiddenCtx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
       if (!ctx || !hiddenCtx) { animationRef.current = requestAnimationFrame(renderLoop); return; }
 
       const charHeight = options.fontSize;
-      const charWidth = charHeight * 0.5;
+      const charWidth = charHeight * 0.6;
       const cols = Math.floor(canvas.width / charWidth);
       const rows = Math.floor(canvas.height / charHeight);
       if (cols <= 0 || rows <= 0) { animationRef.current = requestAnimationFrame(renderLoop); return; }
@@ -83,6 +96,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         prevFrameRef.current = null;
       }
 
+      // Draw full video stretched to fill entire grid
       hiddenCtx.save();
       hiddenCtx.translate(cols, 0);
       hiddenCtx.scale(-1, 1);
@@ -119,11 +133,9 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
           for (let x = 0; x < cols; x++) {
             const offset = (y * cols + x) * 4;
             let lum = 0.2126 * data[offset] + 0.7152 * data[offset+1] + 0.0722 * data[offset+2];
-            // Apply contrast around midpoint, then brightness
             lum = contrastFactor * (lum - 128) + 128;
             lum = lum * options.brightness;
             lum = Math.max(0, Math.min(255, lum));
-            // Boost original colors by brightness for display
             const br = options.brightness;
             const cr = Math.min(255, data[offset] * br);
             const cg = Math.min(255, data[offset+1] * br);
@@ -160,7 +172,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
   }, [options]);
 
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [timerDelay, setTimerDelay] = useState(0); // 0 = instant, 3, 5, 10
+  const [timerDelay, setTimerDelay] = useState(0);
 
   const doCapture = useCallback(() => {
     if (!canvasRef.current) return;
@@ -215,8 +227,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         </div>
       )}
 
-      <video ref={videoRef} playsInline autoPlay muted style={{ display: 'none' }} />
-      <canvas ref={hiddenCanvasRef} className="hidden" />
+      {/* No video element in DOM — created programmatically */}
       <canvas ref={canvasRef} className="block w-full h-full" />
 
       {/* Timer selector + capture button */}
@@ -224,7 +235,6 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         position: 'absolute', bottom: '140px', left: '50%', transform: 'translateX(-50%)',
         zIndex: 40, display: 'flex', alignItems: 'center', gap: '12px',
       }}>
-        {/* Timer pills */}
         <div style={{ display: 'flex', gap: '4px' }}>
           {timerOptions.map(t => (
             <button key={t} onClick={() => setTimerDelay(t)} style={{
@@ -237,7 +247,6 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
           ))}
         </div>
 
-        {/* Capture button */}
         <button
           onClick={startCapture}
           disabled={countdown !== null}
