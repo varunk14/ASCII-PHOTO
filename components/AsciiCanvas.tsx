@@ -17,7 +17,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const hiddenCtxRef = useRef<CanvasRenderingContext2D | null>(null);
-  const orientationRef = useRef<number>(0);
+
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showFlash, setShowFlash] = useState(false);
@@ -66,32 +66,6 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
-    };
-  }, []);
-
-  // Track device orientation for correct video rendering
-  useEffect(() => {
-    const updateOrientation = () => {
-      if (screen.orientation) {
-        orientationRef.current = screen.orientation.angle;
-      } else {
-        // Fallback for older browsers
-        orientationRef.current = window.orientation as number || 0;
-      }
-    };
-
-    updateOrientation();
-
-    if (screen.orientation) {
-      screen.orientation.addEventListener('change', updateOrientation);
-    }
-    window.addEventListener('orientationchange', updateOrientation);
-
-    return () => {
-      if (screen.orientation) {
-        screen.orientation.removeEventListener('change', updateOrientation);
-      }
-      window.removeEventListener('orientationchange', updateOrientation);
     };
   }, []);
 
@@ -173,29 +147,11 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         return;
       }
 
-      // Draw video to hidden canvas
-      // Check if video dimensions are swapped (landscape camera in portrait view or vice versa)
-      const videoAspect = video.videoWidth / video.videoHeight;
-      const canvasAspect = cols / rows;
-      const isRotated = (videoAspect > 1 && canvasAspect < 0.8) || (videoAspect < 1 && canvasAspect > 1.2);
-      const angle = orientationRef.current;
-
+      // Draw video mirrored (selfie mode) to hidden canvas
       hCtx.save();
-      if (angle === 180) {
-        // Phone held upside down
-        hCtx.translate(cols, rows);
-        hCtx.rotate(Math.PI);
-      }
-
-      if (isRotated) {
-        // Video orientation doesn't match screen — fit it properly
-        const scale = Math.min(cols / video.videoWidth, rows / video.videoHeight);
-        const dx = (cols - video.videoWidth * scale) / 2;
-        const dy = (rows - video.videoHeight * scale) / 2;
-        hCtx.drawImage(video, dx, dy, video.videoWidth * scale, video.videoHeight * scale);
-      } else {
-        hCtx.drawImage(video, 0, 0, cols, rows);
-      }
+      hCtx.translate(cols, 0);
+      hCtx.scale(-1, 1);
+      hCtx.drawImage(video, 0, 0, cols, rows);
       hCtx.restore();
 
       const frameData = hCtx.getImageData(0, 0, cols, rows);
