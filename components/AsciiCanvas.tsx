@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { AsciiOptions } from '../types';
 import { getAsciiChar } from '../utils/asciiConverter';
 import { playStartupSound, playCaptureSound, playCountdownBeep } from '../utils/soundEffects';
-import { Timer, SwitchCamera, Camera } from 'lucide-react';
+import { Timer, Camera } from 'lucide-react';
 
 interface AsciiCanvasProps {
   options: AsciiOptions;
@@ -13,112 +13,65 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hiddenCanvasRef = useRef<HTMLCanvasElement>(null);
   const prevFrameRef = useRef<Float32Array | null>(null);
-  const animationRef = useRef<number>(undefined);
-  const streamRef = useRef<MediaStream | null>(null);
-  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
-  const hiddenCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const animationRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showFlash, setShowFlash] = useState(false);
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
-  const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
 
-  // Check if device has multiple cameras
+  // Start camera
   useEffect(() => {
-    navigator.mediaDevices.enumerateDevices().then(devices => {
-      const videoDevices = devices.filter(d => d.kind === 'videoinput');
-      setHasMultipleCameras(videoDevices.length > 1);
-    }).catch(() => {});
-  }, []);
+    let stream: MediaStream | null = null;
 
-  // Start / restart camera
-  const startCamera = useCallback(async (facing: 'user' | 'environment') => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-
-    setError(null);
-
-    const attempts: MediaStreamConstraints[] = [
-      { video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: { exact: facing } } },
-      { video: { facingMode: { exact: facing } } },
-      { video: { facingMode: facing } },
-      { video: true },
-    ];
-
-    for (const constraints of attempts) {
+    const startCamera = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        streamRef.current = stream;
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: 'user'
+          }
+        });
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          // Wait for video to be ready before playing
-          await new Promise<void>((resolve, reject) => {
-            const video = videoRef.current!;
-            video.onloadedmetadata = () => {
-              video.play().then(resolve).catch(reject);
-            };
-            // Timeout fallback
-            setTimeout(() => resolve(), 2000);
-          });
+          await videoRef.current.play().catch(e => console.error("Play error:", e));
+          playStartupSound();
         }
-        return;
       } catch {
-        // Try next
+        setError("Can't access camera. Please allow permissions!");
       }
-    }
+    };
 
-    setError("Can't access camera. Please allow permissions!");
-  }, []);
+    startCamera();
 
-  useEffect(() => {
-    startCamera(facingMode).then(() => playStartupSound());
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
-
-  const handleFlipCamera = useCallback(() => {
-    const newFacing = facingMode === 'user' ? 'environment' : 'user';
-    setFacingMode(newFacing);
-    prevFrameRef.current = null;
-    startCamera(newFacing);
-  }, [facingMode, startCamera]);
 
   // Handle canvas resizing
   useEffect(() => {
     const handleResize = () => {
       if (canvasRef.current) {
         const parent = canvasRef.current.parentElement;
-        const w = parent ? parent.clientWidth : window.innerWidth;
-        const h = parent ? parent.clientHeight : window.innerHeight;
-        if (canvasRef.current.width !== w || canvasRef.current.height !== h) {
-          canvasRef.current.width = w;
-          canvasRef.current.height = h;
-          // Reset cached context after resize
-          ctxRef.current = null;
+        if (parent) {
+          canvasRef.current.width = parent.clientWidth;
+          canvasRef.current.height = parent.clientHeight;
+        } else {
+          canvasRef.current.width = window.innerWidth;
+          canvasRef.current.height = window.innerHeight;
         }
       }
     };
 
     window.addEventListener('resize', handleResize);
-    window.addEventListener('orientationchange', () => setTimeout(handleResize, 150));
     handleResize();
-
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Reset smoothing buffer when font size changes
   useEffect(() => {
     prevFrameRef.current = null;
   }, [options.fontSize]);
@@ -135,16 +88,8 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         return;
       }
 
-      // Cache contexts to avoid re-getting every frame
-      if (!ctxRef.current) {
-        ctxRef.current = canvas.getContext('2d', { alpha: false });
-      }
-      if (!hiddenCtxRef.current) {
-        hiddenCtxRef.current = hiddenCanvas.getContext('2d', { willReadFrequently: true });
-      }
-
-      const ctx = ctxRef.current;
-      const hiddenCtx = hiddenCtxRef.current;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      const hiddenCtx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
 
       if (!ctx || !hiddenCtx) {
         animationRef.current = requestAnimationFrame(renderLoop);
@@ -165,58 +110,48 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
       if (hiddenCanvas.width !== cols || hiddenCanvas.height !== rows) {
         hiddenCanvas.width = cols;
         hiddenCanvas.height = rows;
-        hiddenCtxRef.current = hiddenCanvas.getContext('2d', { willReadFrequently: true });
         prevFrameRef.current = null;
       }
 
-      const hCtx = hiddenCtxRef.current;
-      if (!hCtx) {
-        animationRef.current = requestAnimationFrame(renderLoop);
-        return;
-      }
+      // Draw video mirrored (selfie mode)
+      hiddenCtx.save();
+      hiddenCtx.translate(cols, 0);
+      hiddenCtx.scale(-1, 1);
+      hiddenCtx.drawImage(video, 0, 0, cols, rows);
+      hiddenCtx.restore();
 
-      // Draw video to hidden canvas (mirror only for front camera)
-      hCtx.save();
-      if (facingMode === 'user') {
-        hCtx.translate(cols, 0);
-        hCtx.scale(-1, 1);
-      }
-      hCtx.drawImage(video, 0, 0, cols, rows);
-      hCtx.restore();
-
-      const frameData = hCtx.getImageData(0, 0, cols, rows);
+      const frameData = hiddenCtx.getImageData(0, 0, cols, rows);
       const data = frameData.data;
 
-      // Temporal smoothing
+      // Temporal smoothing to reduce ASCII jitter
       const pixelCount = data.length;
+
       if (!prevFrameRef.current || prevFrameRef.current.length !== pixelCount) {
         prevFrameRef.current = new Float32Array(pixelCount);
         for (let i = 0; i < pixelCount; i++) prevFrameRef.current[i] = data[i];
       }
 
       const prev = prevFrameRef.current;
-      const smoothFactor = 0.3; // 1 - inertia(0.7)
+      const inertia = 0.75;
 
       for (let i = 0; i < pixelCount; i++) {
-        const newValue = prev[i] + (data[i] - prev[i]) * smoothFactor;
+        const target = data[i];
+        const current = prev[i];
+        const newValue = current + (target - current) * (1 - inertia);
         prev[i] = newValue;
         data[i] = newValue;
       }
 
-      // Clear
+      // Clear canvas
       ctx.fillStyle = '#1a0a1a';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       ctx.font = `${options.fontSize}px 'JetBrains Mono', monospace`;
       ctx.textBaseline = 'top';
 
-      const c = options.contrast;
-      const contrastFactor = (259 * (c * 255 + 255)) / (255 * (259 - c * 255));
-      const bright = options.brightness;
-      const density = options.density;
+      const contrastFactor = (259 * (options.contrast * 255 + 255)) / (255 * (259 - options.contrast * 255));
 
       if (options.colorMode === 'color') {
-        // Full Color Mode — per-character color
         for (let y = 0; y < rows; y++) {
           for (let x = 0; x < cols; x++) {
             const offset = (y * cols + x) * 4;
@@ -226,17 +161,15 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
 
             let brightness = 0.2126 * r + 0.7152 * g + 0.0722 * b;
             brightness = contrastFactor * (brightness - 128) + 128;
-            brightness *= bright;
-            if (brightness < 0) brightness = 0;
-            else if (brightness > 255) brightness = 255;
+            brightness *= options.brightness;
+            brightness = Math.max(0, Math.min(255, brightness));
 
-            const char = getAsciiChar(brightness, density);
+            const char = getAsciiChar(brightness, options.density);
             ctx.fillStyle = `rgb(${r},${g},${b})`;
             ctx.fillText(char, x * charWidth, y * charHeight);
           }
         }
       } else {
-        // Monochromatic — fast row-based rendering
         if (options.colorMode === 'sakura') ctx.fillStyle = '#f9a8d4';
         else if (options.colorMode === 'lavender') ctx.fillStyle = '#d8b4fe';
         else if (options.colorMode === 'sunset') ctx.fillStyle = '#fb923c';
@@ -252,11 +185,10 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
 
             let brightness = 0.2126 * r + 0.7152 * g + 0.0722 * b;
             brightness = contrastFactor * (brightness - 128) + 128;
-            brightness *= bright;
-            if (brightness < 0) brightness = 0;
-            else if (brightness > 255) brightness = 255;
+            brightness *= options.brightness;
+            brightness = Math.max(0, Math.min(255, brightness));
 
-            rowText += getAsciiChar(brightness, density);
+            rowText += getAsciiChar(brightness, options.density);
           }
           ctx.fillText(rowText, 0, y * charHeight);
         }
@@ -272,7 +204,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [options, facingMode]);
+  }, [options]);
 
   const doCapture = useCallback(() => {
     if (!canvasRef.current) return;
@@ -283,7 +215,6 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
 
     const canvas = canvasRef.current;
 
-    // Use toBlob for better memory efficiency on mobile
     canvas.toBlob((blob) => {
       if (!blob) return;
 
@@ -291,7 +222,6 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
       if (isIOS) {
-        // iOS: open in new tab, user long-presses to save
         const newTab = window.open();
         if (newTab) {
           const img = newTab.document.createElement('img');
@@ -305,7 +235,6 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         link.href = url;
         link.download = `ascii_photo_${Date.now()}.png`;
         link.click();
-        // Clean up blob URL after download starts
         setTimeout(() => URL.revokeObjectURL(url), 5000);
       }
     }, 'image/png');
@@ -350,7 +279,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         muted
       />
       <canvas ref={hiddenCanvasRef} className="hidden" />
-      <canvas ref={canvasRef} className="block w-full h-full touch-none" />
+      <canvas ref={canvasRef} className="block w-full h-full" />
 
       {showFlash && (
         <div className="absolute inset-0 bg-white/60 z-30 pointer-events-none" />
@@ -363,15 +292,6 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
             {countdown}
           </div>
         </div>
-      )}
-
-      {hasMultipleCameras && (
-        <button
-          onClick={handleFlipCamera}
-          className="absolute top-4 right-4 z-40 bg-black/30 hover:bg-black/50 text-white/80 hover:text-white p-3 rounded-full backdrop-blur-md transition-all active:scale-90 border border-white/10"
-        >
-          <SwitchCamera className="w-5 h-5" />
-        </button>
       )}
 
       <div className="absolute bottom-16 sm:bottom-32 left-1/2 transform -translate-x-1/2 flex items-center gap-4 sm:gap-5 z-40">
