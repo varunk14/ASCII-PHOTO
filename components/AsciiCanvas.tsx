@@ -21,7 +21,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
     const startCamera = async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+          video: { width: { ideal: 1280 }, height: { ideal: 960 }, facingMode: 'user' }
         });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -72,7 +72,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
       if (!ctx || !hiddenCtx) { animationRef.current = requestAnimationFrame(renderLoop); return; }
 
       const charHeight = options.fontSize;
-      const charWidth = charHeight * 0.6;
+      const charWidth = charHeight * 0.5;
       const cols = Math.floor(canvas.width / charWidth);
       const rows = Math.floor(canvas.height / charHeight);
       if (cols <= 0 || rows <= 0) { animationRef.current = requestAnimationFrame(renderLoop); return; }
@@ -215,7 +215,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         </div>
       )}
 
-      <video ref={videoRef} playsInline autoPlay muted style={{ position: 'fixed', top: '-9999px', left: '-9999px', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' }} />
+      <video ref={videoRef} playsInline autoPlay muted style={{ display: 'none' }} />
       <canvas ref={hiddenCanvasRef} className="hidden" />
       <canvas ref={canvasRef} className="block w-full h-full" />
 

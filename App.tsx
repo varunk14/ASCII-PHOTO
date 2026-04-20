@@ -5,7 +5,7 @@ import { AsciiOptions } from './types';
 
 const App: React.FC = () => {
   const [options, setOptions] = useState<AsciiOptions>({
-    fontSize: window.innerWidth < 640 ? 6 : 8,
+    fontSize: window.innerWidth < 640 ? 4 : 6,
     brightness: 1.2,
     contrast: 1.1,
     colorMode: 'ice',
