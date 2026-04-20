@@ -1,8 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { AsciiOptions } from '../types';
 import { getAsciiChar } from '../utils/asciiConverter';
-import { playStartupSound, playCaptureSound, playCountdownBeep } from '../utils/soundEffects';
-import { Timer, Camera } from 'lucide-react';
+import { playStartupSound, playCaptureSound } from '../utils/soundEffects';
+import { Camera } from 'lucide-react';
 
 interface AsciiCanvasProps {
   options: AsciiOptions;
@@ -15,43 +15,27 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
   const prevFrameRef = useRef<Float32Array | null>(null);
   const animationRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const [showFlash, setShowFlash] = useState(false);
 
-  // Start camera
   useEffect(() => {
     let stream: MediaStream | null = null;
-
     const startCamera = async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: 'user'
-          }
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
         });
-
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(e => console.error("Play error:", e));
+          await videoRef.current.play().catch(() => {});
           playStartupSound();
         }
       } catch {
         setError("Can't access camera. Please allow permissions!");
       }
     };
-
     startCamera();
-
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
+    return () => { if (stream) stream.getTracks().forEach(t => t.stop()); };
   }, []);
 
-  // Handle canvas resizing
   useEffect(() => {
     const handleResize = () => {
       if (canvasRef.current) {
@@ -65,18 +49,13 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         }
       }
     };
-
     window.addEventListener('resize', handleResize);
     handleResize();
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Reset smoothing buffer when font size changes
-  useEffect(() => {
-    prevFrameRef.current = null;
-  }, [options.fontSize]);
+  useEffect(() => { prevFrameRef.current = null; }, [options.fontSize]);
 
-  // Render loop
   useEffect(() => {
     const renderLoop = () => {
       const video = videoRef.current;
@@ -90,22 +69,13 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
 
       const ctx = canvas.getContext('2d', { alpha: false });
       const hiddenCtx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
-
-      if (!ctx || !hiddenCtx) {
-        animationRef.current = requestAnimationFrame(renderLoop);
-        return;
-      }
+      if (!ctx || !hiddenCtx) { animationRef.current = requestAnimationFrame(renderLoop); return; }
 
       const charHeight = options.fontSize;
       const charWidth = charHeight * 0.6;
-
       const cols = Math.floor(canvas.width / charWidth);
       const rows = Math.floor(canvas.height / charHeight);
-
-      if (cols <= 0 || rows <= 0) {
-        animationRef.current = requestAnimationFrame(renderLoop);
-        return;
-      }
+      if (cols <= 0 || rows <= 0) { animationRef.current = requestAnimationFrame(renderLoop); return; }
 
       if (hiddenCanvas.width !== cols || hiddenCanvas.height !== rows) {
         hiddenCanvas.width = cols;
@@ -113,7 +83,6 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         prevFrameRef.current = null;
       }
 
-      // Draw video mirrored (selfie mode)
       hiddenCtx.save();
       hiddenCtx.translate(cols, 0);
       hiddenCtx.scale(-1, 1);
@@ -122,75 +91,64 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
 
       const frameData = hiddenCtx.getImageData(0, 0, cols, rows);
       const data = frameData.data;
-
-      // Temporal smoothing to reduce ASCII jitter
       const pixelCount = data.length;
 
       if (!prevFrameRef.current || prevFrameRef.current.length !== pixelCount) {
         prevFrameRef.current = new Float32Array(pixelCount);
         for (let i = 0; i < pixelCount; i++) prevFrameRef.current[i] = data[i];
       }
-
       const prev = prevFrameRef.current;
-      const inertia = 0.75;
-
+      const smoothing = 0.45;
       for (let i = 0; i < pixelCount; i++) {
-        const target = data[i];
-        const current = prev[i];
-        const newValue = current + (target - current) * (1 - inertia);
-        prev[i] = newValue;
-        data[i] = newValue;
+        const v = prev[i] + (data[i] - prev[i]) * smoothing;
+        prev[i] = v;
+        data[i] = v;
       }
 
-      // Clear canvas
-      ctx.fillStyle = '#1a0a1a';
+      ctx.fillStyle = '#020617';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-
       ctx.font = `${options.fontSize}px 'JetBrains Mono', monospace`;
       ctx.textBaseline = 'top';
 
-      const contrastFactor = (259 * (options.contrast * 255 + 255)) / (255 * (259 - options.contrast * 255));
+      // Contrast: 1.0 = no change, <1 = less contrast, >1 = more contrast
+      const c = options.contrast;
+      const contrastFactor = c * c; // quadratic curve for natural feel
 
       if (options.colorMode === 'color') {
         for (let y = 0; y < rows; y++) {
           for (let x = 0; x < cols; x++) {
             const offset = (y * cols + x) * 4;
-            const r = data[offset];
-            const g = data[offset + 1];
-            const b = data[offset + 2];
-
-            let brightness = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-            brightness = contrastFactor * (brightness - 128) + 128;
-            brightness *= options.brightness;
-            brightness = Math.max(0, Math.min(255, brightness));
-
-            const char = getAsciiChar(brightness, options.density);
-            ctx.fillStyle = `rgb(${r},${g},${b})`;
-            ctx.fillText(char, x * charWidth, y * charHeight);
+            let lum = 0.2126 * data[offset] + 0.7152 * data[offset+1] + 0.0722 * data[offset+2];
+            // Apply contrast around midpoint, then brightness
+            lum = contrastFactor * (lum - 128) + 128;
+            lum = lum * options.brightness;
+            lum = Math.max(0, Math.min(255, lum));
+            // Boost original colors by brightness for display
+            const br = options.brightness;
+            const cr = Math.min(255, data[offset] * br);
+            const cg = Math.min(255, data[offset+1] * br);
+            const cb = Math.min(255, data[offset+2] * br);
+            ctx.fillStyle = `rgb(${cr|0},${cg|0},${cb|0})`;
+            ctx.fillText(getAsciiChar(lum, options.density), x * charWidth, y * charHeight);
           }
         }
       } else {
-        if (options.colorMode === 'sakura') ctx.fillStyle = '#f9a8d4';
-        else if (options.colorMode === 'lavender') ctx.fillStyle = '#d8b4fe';
-        else if (options.colorMode === 'sunset') ctx.fillStyle = '#fb923c';
-        else ctx.fillStyle = '#ffffff';
+        if (options.colorMode === 'ice') ctx.fillStyle = '#38bdf8';
+        else if (options.colorMode === 'ember') ctx.fillStyle = '#f97316';
+        else if (options.colorMode === 'neon') ctx.fillStyle = '#a855f7';
+        else ctx.fillStyle = '#e2e8f0';
 
         for (let y = 0; y < rows; y++) {
-          let rowText = "";
+          let row = "";
           for (let x = 0; x < cols; x++) {
             const offset = (y * cols + x) * 4;
-            const r = data[offset];
-            const g = data[offset + 1];
-            const b = data[offset + 2];
-
-            let brightness = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-            brightness = contrastFactor * (brightness - 128) + 128;
-            brightness *= options.brightness;
-            brightness = Math.max(0, Math.min(255, brightness));
-
-            rowText += getAsciiChar(brightness, options.density);
+            let lum = 0.2126 * data[offset] + 0.7152 * data[offset+1] + 0.0722 * data[offset+2];
+            lum = contrastFactor * (lum - 128) + 128;
+            lum = lum * options.brightness;
+            lum = Math.max(0, Math.min(255, lum));
+            row += getAsciiChar(lum, options.density);
           }
-          ctx.fillText(rowText, 0, y * charHeight);
+          ctx.fillText(row, 0, y * charHeight);
         }
       }
 
@@ -198,116 +156,98 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
     };
 
     animationRef.current = requestAnimationFrame(renderLoop);
-
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
+    return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
   }, [options]);
+
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [timerDelay, setTimerDelay] = useState(0); // 0 = instant, 3, 5, 10
 
   const doCapture = useCallback(() => {
     if (!canvasRef.current) return;
-
-    setShowFlash(true);
     playCaptureSound();
-    setTimeout(() => setShowFlash(false), 300);
-
     const canvas = canvasRef.current;
-
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-
-      const url = URL.createObjectURL(blob);
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-
-      if (isIOS) {
-        const newTab = window.open();
-        if (newTab) {
-          const img = newTab.document.createElement('img');
-          img.src = url;
-          img.style.cssText = 'max-width:100%;height:auto';
-          newTab.document.body.style.cssText = 'margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a0a1a';
-          newTab.document.body.appendChild(img);
-        }
-      } else {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `ascii_photo_${Date.now()}.png`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-      }
-    }, 'image/png');
+    const link = document.createElement('a');
+    link.href = canvas.toDataURL('image/png');
+    link.download = `ascii_${Date.now()}.png`;
+    link.click();
   }, []);
 
-  const handleTimerCapture = useCallback(() => {
-    let count = 3;
-    setCountdown(count);
-    playCountdownBeep(false);
+  const startCapture = useCallback(() => {
+    if (countdown !== null) return;
+    if (timerDelay === 0) {
+      doCapture();
+    } else {
+      let remaining = timerDelay;
+      setCountdown(remaining);
+      const interval = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+          clearInterval(interval);
+          setCountdown(null);
+          doCapture();
+        } else {
+          setCountdown(remaining);
+        }
+      }, 1000);
+    }
+  }, [timerDelay, countdown, doCapture]);
 
-    const interval = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdown(count);
-        playCountdownBeep(false);
-      } else {
-        setCountdown(null);
-        clearInterval(interval);
-        playCountdownBeep(true);
-        doCapture();
-      }
-    }, 1000);
-  }, [doCapture]);
+  const timerOptions = [0, 3, 5, 10];
 
   return (
     <div className="relative w-full h-full">
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-pink-50/90 z-50 p-6">
-          <div className="text-center p-6 bg-white rounded-3xl shadow-lg max-w-xs w-full">
-            <div className="text-4xl mb-3">📸</div>
-            <p className="text-pink-600 font-medium text-sm">{error}</p>
-          </div>
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 z-50">
+          <p className="text-cyan-400 text-sm">{error}</p>
         </div>
       )}
 
-      <video
-        ref={videoRef}
-        className="absolute top-0 left-0 opacity-0 pointer-events-none -z-10"
-        style={{ width: '1px', height: '1px' }}
-        playsInline
-        autoPlay
-        muted
-      />
+      {/* Countdown overlay */}
+      {countdown !== null && (
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 50, pointerEvents: 'none',
+        }}>
+          <span style={{
+            fontSize: '120px', fontWeight: 'bold', color: '#22d3ee',
+            textShadow: '0 0 40px rgba(34,211,238,0.5)', opacity: 0.8,
+          }}>{countdown}</span>
+        </div>
+      )}
+
+      <video ref={videoRef} playsInline autoPlay muted style={{ position: 'fixed', top: '-9999px', left: '-9999px', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' }} />
       <canvas ref={hiddenCanvasRef} className="hidden" />
       <canvas ref={canvasRef} className="block w-full h-full" />
 
-      {showFlash && (
-        <div className="absolute inset-0 bg-white/60 z-30 pointer-events-none" />
-      )}
-
-      {countdown !== null && (
-        <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
-          <div className="text-7xl sm:text-8xl font-bold text-white animate-bounce-in"
-               style={{ textShadow: '0 0 40px rgba(236,72,153,0.6), 0 0 80px rgba(168,85,247,0.4)' }}>
-            {countdown}
-          </div>
+      {/* Timer selector + capture button */}
+      <div style={{
+        position: 'absolute', bottom: '140px', left: '50%', transform: 'translateX(-50%)',
+        zIndex: 40, display: 'flex', alignItems: 'center', gap: '12px',
+      }}>
+        {/* Timer pills */}
+        <div style={{ display: 'flex', gap: '4px' }}>
+          {timerOptions.map(t => (
+            <button key={t} onClick={() => setTimerDelay(t)} style={{
+              padding: '4px 10px', borderRadius: '12px', fontSize: '12px', border: 'none', cursor: 'pointer',
+              background: timerDelay === t ? '#22d3ee' : 'rgba(15,23,42,0.8)',
+              color: timerDelay === t ? '#0f172a' : '#94a3b8',
+              fontWeight: timerDelay === t ? 'bold' : 'normal',
+              backdropFilter: 'blur(4px)',
+            }}>{t === 0 ? 'Off' : `${t}s`}</button>
+          ))}
         </div>
-      )}
 
-      <div className="absolute bottom-16 sm:bottom-32 left-1/2 transform -translate-x-1/2 flex items-center gap-4 sm:gap-5 z-40">
+        {/* Capture button */}
         <button
-          onClick={doCapture}
-          className="group relative bg-gradient-to-br from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white p-5 sm:p-7 rounded-full shadow-xl hover:shadow-2xl transition-all active:scale-90 hover:scale-105"
+          onClick={startCapture}
+          disabled={countdown !== null}
+          style={{
+            background: countdown !== null ? 'rgba(34,211,238,0.4)' : 'rgba(34,211,238,0.8)',
+            color: '#0f172a', padding: '14px', borderRadius: '50%', border: 'none', cursor: countdown !== null ? 'default' : 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          }}
         >
-          <div className="absolute inset-0 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 opacity-40 animate-ping" />
-          <Camera className="w-7 h-7 sm:w-8 sm:h-8" />
-        </button>
-
-        <button
-          onClick={handleTimerCapture}
-          className="group bg-white/90 hover:bg-white text-purple-500 hover:text-purple-600 p-3.5 sm:p-4 rounded-full shadow-lg hover:shadow-xl transition-all active:scale-90 hover:scale-110 backdrop-blur-md border border-purple-200"
-        >
-          <Timer className="w-5 h-5 sm:w-6 sm:h-6" />
+          <Camera className="w-6 h-6" />
         </button>
       </div>
     </div>

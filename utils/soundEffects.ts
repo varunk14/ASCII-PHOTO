@@ -2,179 +2,117 @@ const AudioContextClass = (window.AudioContext || (window as any).webkitAudioCon
 let audioCtx: AudioContext | null = null;
 
 const getContext = () => {
-  if (!audioCtx) {
-    audioCtx = new AudioContextClass();
-  }
+  if (!audioCtx) audioCtx = new AudioContextClass();
   return audioCtx;
 };
 
 const ensureContext = async () => {
   const ctx = getContext();
   if (ctx.state === 'suspended') {
-    try {
-      await ctx.resume();
-    } catch (e) {
-      console.warn("Audio context resume failed", e);
-    }
+    try { await ctx.resume(); } catch {}
   }
   return ctx;
 };
 
-// Cute startup chime - a bright, happy arpeggio
+// Deep ocean startup — rising sonar ping
 export const playStartupSound = async () => {
   try {
     const ctx = await ensureContext();
     const t = ctx.currentTime;
 
-    // Happy major arpeggio: C5 E5 G5 C6
-    const notes = [523.25, 659.25, 783.99, 1046.50];
+    // Sonar sweep rising
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
 
-    notes.forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
 
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, t + i * 0.12);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(200, t);
+    osc.frequency.exponentialRampToValueAtTime(1200, t + 0.6);
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(800, t);
+    filter.Q.value = 2;
 
-      gain.gain.setValueAtTime(0, t + i * 0.12);
-      gain.gain.linearRampToValueAtTime(0.06, t + i * 0.12 + 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.6);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.06, t + 0.15);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
 
-      osc.start(t + i * 0.12);
-      osc.stop(t + i * 0.12 + 0.6);
-    });
-  } catch (e) { console.error(e); }
+    osc.start(t);
+    osc.stop(t + 0.8);
+
+    // Echo ping
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1400, t + 0.3);
+    gain2.gain.setValueAtTime(0.03, t + 0.3);
+    gain2.gain.exponentialRampToValueAtTime(0.001, t + 1.0);
+    osc2.start(t + 0.3);
+    osc2.stop(t + 1.0);
+  } catch {}
 };
 
-// Cute camera shutter / sparkle sound
+// Shutter capture — crisp digital snap
 export const playCaptureSound = async () => {
   try {
     const ctx = await ensureContext();
     const t = ctx.currentTime;
 
-    // Sparkle: descending high-pitched twinkles
-    for (let i = 0; i < 5; i++) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = 'sine';
-      const freq = 2000 - i * 200 + Math.random() * 300;
-      osc.frequency.setValueAtTime(freq, t + i * 0.04);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      gain.gain.setValueAtTime(0.04, t + i * 0.04);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.04 + 0.15);
-
-      osc.start(t + i * 0.04);
-      osc.stop(t + i * 0.04 + 0.15);
-    }
-  } catch (e) { console.error(e); }
-};
-
-// Cute "thinking" sound - gentle bubbling
-export const playAnalysisStartSound = async () => {
-  try {
-    const ctx = await ensureContext();
-    const t = ctx.currentTime;
-
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(ctx.destination);
 
       osc.type = 'sine';
-      const freq = 800 + Math.random() * 600;
-      osc.frequency.setValueAtTime(freq, t + i * 0.08);
-      osc.frequency.exponentialRampToValueAtTime(freq * 1.5, t + i * 0.08 + 0.06);
-
-      gain.gain.setValueAtTime(0.025, t + i * 0.08);
-      gain.gain.linearRampToValueAtTime(0, t + i * 0.08 + 0.06);
-
-      osc.start(t + i * 0.08);
-      osc.stop(t + i * 0.08 + 0.06);
+      osc.frequency.setValueAtTime(1800 - i * 250, t + i * 0.03);
+      gain.gain.setValueAtTime(0.05, t + i * 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.03 + 0.1);
+      osc.start(t + i * 0.03);
+      osc.stop(t + i * 0.03 + 0.1);
     }
-  } catch (e) { console.error(e); }
+  } catch {}
 };
 
-// Happy completion sound - celebratory fanfare
-export const playAnalysisCompleteSound = async () => {
-  try {
-    const ctx = await ensureContext();
-    const t = ctx.currentTime;
-
-    // Celebratory: C5 E5 G5 (hold) C6
-    const notes = [
-      { freq: 523.25, time: 0, dur: 0.3 },
-      { freq: 659.25, time: 0.1, dur: 0.3 },
-      { freq: 783.99, time: 0.2, dur: 0.5 },
-      { freq: 1046.50, time: 0.4, dur: 0.8 },
-    ];
-
-    notes.forEach(({ freq, time, dur }) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, t + time);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      gain.gain.setValueAtTime(0, t + time);
-      gain.gain.linearRampToValueAtTime(0.05, t + time + 0.04);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + time + dur);
-
-      osc.start(t + time);
-      osc.stop(t + time + dur);
-    });
-  } catch (e) { console.error(e); }
-};
-
-// Soft button click
-export const playButtonSound = async () => {
-  try {
-    const ctx = await ensureContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(1200, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(1800, ctx.currentTime + 0.06);
-
-    gain.gain.setValueAtTime(0.025, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.06);
-
-    osc.start();
-    osc.stop(ctx.currentTime + 0.06);
-  } catch (e) {}
-};
-
-// Countdown beep (for photo countdown)
+// Countdown beep
 export const playCountdownBeep = async (final: boolean = false) => {
   try {
     const ctx = await ensureContext();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-
     osc.connect(gain);
     gain.connect(ctx.destination);
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(final ? 880 : 660, ctx.currentTime);
-
+    osc.frequency.setValueAtTime(final ? 980 : 740, ctx.currentTime);
     gain.gain.setValueAtTime(0.06, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (final ? 0.3 : 0.15));
-
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (final ? 0.3 : 0.12));
     osc.start();
-    osc.stop(ctx.currentTime + (final ? 0.3 : 0.15));
-  } catch (e) {}
+    osc.stop(ctx.currentTime + (final ? 0.3 : 0.12));
+  } catch {}
+};
+
+// Soft UI click
+export const playButtonSound = async () => {
+  try {
+    const ctx = await ensureContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1100, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1600, ctx.currentTime + 0.04);
+    gain.gain.setValueAtTime(0.02, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.04);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.04);
+  } catch {}
 };

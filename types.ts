@@ -2,31 +2,30 @@ export interface AsciiOptions {
   fontSize: number;
   brightness: number;
   contrast: number;
-  colorMode: 'sakura' | 'lavender' | 'sunset' | 'color' | 'bw';
-  density: 'hearts' | 'stars' | 'flowers' | 'classic' | 'blocks';
-  resolution: number;
-}
-
-export interface AnalysisResult {
-  compliment: string;
-  cutenessLevel: string;
-  tags: string[];
-  loveNote: string;
+  colorMode: 'ice' | 'ember' | 'neon' | 'color' | 'bw';
+  density: 'dots' | 'code' | 'runes' | 'classic' | 'blocks';
 }
 
 export const DENSITY_MAPS = {
-  hearts: " .,~+*oO#@",
-  stars: " .+*xX#%@",
-  flowers: " .:;+=xX#%@",
-  classic: " .:-=+*#%@",
-  blocks: " ░▒▓█",
+  dots: "  ..··::;;++**ooOO@@##",
+  code: "  ..^^!!**<<&&%%$$##@@",
+  runes: "  ..::;;++==xxXX##%%@@",
+  classic: "  ..::--==++**##%%@@",
+  blocks: "  ░░▒▒▓▓██",
 };
 
-// Cute emoji labels for the density maps
 export const DENSITY_LABELS: Record<string, string> = {
-  hearts: "Hearts",
-  stars: "Stars",
-  flowers: "Flowers",
+  dots: "Dots",
+  code: "Code",
+  runes: "Runes",
   classic: "Classic",
   blocks: "Blocks",
+};
+
+export const COLOR_LABELS: Record<string, string> = {
+  ice: "Ice",
+  ember: "Ember",
+  neon: "Neon",
+  color: "Color",
+  bw: "B&W",
 };
