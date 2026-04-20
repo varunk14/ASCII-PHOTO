@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { AsciiOptions } from '../types';
 import { getAsciiChar } from '../utils/asciiConverter';
 import { playStartupSound, playCaptureSound, playCountdownBeep } from '../utils/soundEffects';
-import { Timer, Camera } from 'lucide-react';
+import { Timer, SwitchCamera, Camera } from 'lucide-react';
 
 interface AsciiCanvasProps {
   options: AsciiOptions;
@@ -17,48 +17,68 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const hiddenCtxRef = useRef<CanvasRenderingContext2D | null>(null);
-
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showFlash, setShowFlash] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
 
+  // Check if device has multiple cameras
   useEffect(() => {
-    const startCamera = async () => {
+    navigator.mediaDevices.enumerateDevices().then(devices => {
+      const videoDevices = devices.filter(d => d.kind === 'videoinput');
+      setHasMultipleCameras(videoDevices.length > 1);
+    }).catch(() => {});
+  }, []);
+
+  // Start / restart camera
+  const startCamera = useCallback(async (facing: 'user' | 'environment') => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
+    setError(null);
+
+    const attempts: MediaStreamConstraints[] = [
+      { video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: { exact: facing } } },
+      { video: { facingMode: { exact: facing } } },
+      { video: { facingMode: facing } },
+      { video: true },
+    ];
+
+    for (const constraints of attempts) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
-        });
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         streamRef.current = stream;
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          await new Promise<void>((resolve) => {
+          // Wait for video to be ready before playing
+          await new Promise<void>((resolve, reject) => {
             const video = videoRef.current!;
             video.onloadedmetadata = () => {
-              video.play().then(() => resolve()).catch(() => resolve());
+              video.play().then(resolve).catch(reject);
             };
+            // Timeout fallback
             setTimeout(() => resolve(), 2000);
           });
-          playStartupSound();
         }
+        return;
       } catch {
-        try {
-          // Fallback: any camera
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          streamRef.current = stream;
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            await videoRef.current.play();
-            playStartupSound();
-          }
-        } catch {
-          setError("Can't access camera. Please allow permissions!");
-        }
+        // Try next
       }
-    };
+    }
 
-    startCamera();
+    setError("Can't access camera. Please allow permissions!");
+  }, []);
 
+  useEffect(() => {
+    startCamera(facingMode).then(() => playStartupSound());
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -68,6 +88,13 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
       }
     };
   }, []);
+
+  const handleFlipCamera = useCallback(() => {
+    const newFacing = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(newFacing);
+    prevFrameRef.current = null;
+    startCamera(newFacing);
+  }, [facingMode, startCamera]);
 
   // Handle canvas resizing
   useEffect(() => {
@@ -79,6 +106,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         if (canvasRef.current.width !== w || canvasRef.current.height !== h) {
           canvasRef.current.width = w;
           canvasRef.current.height = h;
+          // Reset cached context after resize
           ctxRef.current = null;
         }
       }
@@ -147,10 +175,12 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         return;
       }
 
-      // Draw video mirrored (selfie mode) to hidden canvas
+      // Draw video to hidden canvas (mirror only for front camera)
       hCtx.save();
-      hCtx.translate(cols, 0);
-      hCtx.scale(-1, 1);
+      if (facingMode === 'user') {
+        hCtx.translate(cols, 0);
+        hCtx.scale(-1, 1);
+      }
       hCtx.drawImage(video, 0, 0, cols, rows);
       hCtx.restore();
 
@@ -242,7 +272,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [options]);
+  }, [options, facingMode]);
 
   const doCapture = useCallback(() => {
     if (!canvasRef.current) return;
@@ -333,6 +363,15 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options }) => {
             {countdown}
           </div>
         </div>
+      )}
+
+      {hasMultipleCameras && (
+        <button
+          onClick={handleFlipCamera}
+          className="absolute top-4 right-4 z-40 bg-black/30 hover:bg-black/50 text-white/80 hover:text-white p-3 rounded-full backdrop-blur-md transition-all active:scale-90 border border-white/10"
+        >
+          <SwitchCamera className="w-5 h-5" />
+        </button>
       )}
 
       <div className="absolute bottom-16 sm:bottom-32 left-1/2 transform -translate-x-1/2 flex items-center gap-4 sm:gap-5 z-40">
